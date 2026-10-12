@@ -1,0 +1,26 @@
+== benchmark: 1,000 one-unit requests per run, 3 runs per cell, instances 2, client JVM 25.0.4.1, client CPUs 10
+  warm-up contended (not recorded): created 20, 409 insufficient 980, unexpected 0; 2300 req/s; p50 72.3 ms, p95 137.3 ms, p99 171.1 ms, max 294.4 ms
+  FAIL contended c=1000 run 1: 20 created, 980 rejected, 0 unexpected: created 20, 409 insufficient 975, unexpected 5; 2053 req/s; p50 330.0 ms, p95 453.2 ms, p99 464.3 ms, max 472.2 ms {no response (IOException: HTTP/1.1 header parser received no bytes)=5}
+  PASS contended c=1000 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=1000 run 3: 20 created, 980 rejected, 0 unexpected
+  warm-up ample (not recorded): created 1000, 409 insufficient 0, unexpected 0; 930 req/s; p50 181.4 ms, p95 381.1 ms, p99 465.5 ms, max 658.5 ms
+  PASS ample c=1000 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 3: 1000 created, 0 rejected, 0 unexpected
+
+| scenario | concurrency | run | created | 409 insufficient | unexpected | wall s | req/s | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| contended | 1000 | 1 | 20 | 975 | 5 | 0.487 | 2053 | 330.0 | 453.2 | 464.3 | 472.2 |
+| contended | 1000 | 2 | 20 | 980 | 0 | 0.380 | 2631 | 258.3 | 359.9 | 369.3 | 377.0 |
+| contended | 1000 | 3 | 20 | 980 | 0 | 0.382 | 2619 | 173.3 | 367.4 | 375.3 | 380.2 |
+| ample | 1000 | 1 | 1000 | 0 | 0 | 1.109 | 902 | 489.7 | 1067.0 | 1093.4 | 1102.8 |
+| ample | 1000 | 2 | 1000 | 0 | 0 | 0.923 | 1083 | 538.4 | 846.0 | 902.2 | 922.1 |
+| ample | 1000 | 3 | 1000 | 0 | 0 | 0.779 | 1283 | 410.4 | 745.0 | 769.7 | 774.6 |
+
+Median of the runs per cell:
+
+| scenario | concurrency | req/s | p50 ms | p95 ms | p99 ms | max ms | unexpected (total) |
+|---|---|---|---|---|---|---|---|
+| contended | 1000 | 2619 | 258.3 | 367.4 | 375.3 | 380.2 | 5 |
+| ample | 1000 | 1083 | 489.7 | 846.0 | 902.2 | 922.1 | 0 |
+run MV5FFYZB: 5 passed, 1 failed

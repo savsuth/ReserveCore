@@ -1,0 +1,738 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "description" : "Holds limited stock during checkout: reserve units for a bounded time, then confirm or cancel; unconfirmed reservations expire. Every /v1 call needs a merchant API key. Create, confirm and cancel need an Idempotency-Key. Errors are RFC 9457 problem details with a stable `code` and the `requestId` (also in the X-Request-Id response header).",
+    "title" : "ReserveCore API",
+    "version" : "v1"
+  },
+  "servers" : [ {
+    "url" : "/",
+    "description" : "The instance serving this document"
+  } ],
+  "security" : [ {
+    "apiKey" : [ ]
+  } ],
+  "tags" : [ {
+    "description" : "Merchant inventory and its movement history",
+    "name" : "SKUs"
+  }, {
+    "description" : "Hold stock during checkout, then confirm or cancel",
+    "name" : "Reservations"
+  } ],
+  "paths" : {
+    "/v1/reservations" : {
+      "post" : {
+        "description" : "Holds quantity units for holdSeconds (default 600, 5 to 3600). Idempotent per Idempotency-Key: a retry replays the stored response.",
+        "operationId" : "create_1",
+        "parameters" : [ {
+          "description" : "1 to 255 printable ASCII characters, scoped to merchant and operation",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateReservationRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReservationView"
+                }
+              }
+            },
+            "description" : "Reserved; Location is /v1/reservations/{id}",
+            "headers" : {
+              "Idempotent-Replayed" : {
+                "description" : "true when this is the stored response of an earlier request with the same Idempotency-Key",
+                "schema" : {
+                  "type" : "string"
+                },
+                "style" : "simple"
+              }
+            }
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "INVALID_QUANTITY, VALIDATION_FAILED (sku missing, holdSeconds out of range, malformed JSON), IDEMPOTENCY_KEY_MISSING or IDEMPOTENCY_KEY_INVALID"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "UNAUTHORIZED: missing, malformed, unknown or revoked API key"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "SKU_NOT_FOUND"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "INSUFFICIENT_STOCK or IDEMPOTENCY_KEY_REUSED"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "SERVICE_BUSY: a row lock was not obtained within reservecore.lock-timeout (2 s); retry with the same Idempotency-Key after Retry-After"
+          }
+        },
+        "summary" : "Reserve units of a SKU",
+        "tags" : [ "Reservations" ]
+      }
+    },
+    "/v1/reservations/{id}" : {
+      "get" : {
+        "description" : "Shows the effective status: a hold at or past expiresAt reads as EXPIRED, with reclaimPending true until its units are released.",
+        "operationId" : "get_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReservationView"
+                }
+              }
+            },
+            "description" : "The reservation"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "UNAUTHORIZED: missing, malformed, unknown or revoked API key"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "RESERVATION_NOT_FOUND"
+          }
+        },
+        "summary" : "Read a reservation",
+        "tags" : [ "Reservations" ]
+      }
+    },
+    "/v1/reservations/{id}/cancel" : {
+      "post" : {
+        "description" : "ACTIVE to CANCELLED: held units become available again. Rejected at or after expiresAt; the expiration worker releases those units.",
+        "operationId" : "cancel",
+        "parameters" : [ {
+          "description" : "1 to 255 printable ASCII characters, scoped to merchant and operation",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReservationView"
+                }
+              }
+            },
+            "description" : "Cancelled",
+            "headers" : {
+              "Idempotent-Replayed" : {
+                "description" : "true when this is the stored response of an earlier request with the same Idempotency-Key",
+                "schema" : {
+                  "type" : "string"
+                },
+                "style" : "simple"
+              }
+            }
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "IDEMPOTENCY_KEY_MISSING or IDEMPOTENCY_KEY_INVALID"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "UNAUTHORIZED: missing, malformed, unknown or revoked API key"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "RESERVATION_NOT_FOUND"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "RESERVATION_EXPIRED (an overdue hold, expired by this request), INVALID_STATE_TRANSITION (body has currentStatus) or IDEMPOTENCY_KEY_REUSED"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "SERVICE_BUSY: a row lock was not obtained within reservecore.lock-timeout (2 s); retry with the same Idempotency-Key after Retry-After"
+          }
+        },
+        "summary" : "Cancel a reservation",
+        "tags" : [ "Reservations" ]
+      }
+    },
+    "/v1/reservations/{id}/confirm" : {
+      "post" : {
+        "description" : "ACTIVE to CONFIRMED: held units become sold. Rejected at or after expiresAt (database time).",
+        "operationId" : "confirm",
+        "parameters" : [ {
+          "description" : "1 to 255 printable ASCII characters, scoped to merchant and operation",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReservationView"
+                }
+              }
+            },
+            "description" : "Confirmed",
+            "headers" : {
+              "Idempotent-Replayed" : {
+                "description" : "true when this is the stored response of an earlier request with the same Idempotency-Key",
+                "schema" : {
+                  "type" : "string"
+                },
+                "style" : "simple"
+              }
+            }
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "IDEMPOTENCY_KEY_MISSING or IDEMPOTENCY_KEY_INVALID"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "UNAUTHORIZED: missing, malformed, unknown or revoked API key"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "RESERVATION_NOT_FOUND"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "RESERVATION_EXPIRED (an overdue hold, expired by this request), INVALID_STATE_TRANSITION (body has currentStatus) or IDEMPOTENCY_KEY_REUSED"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "SERVICE_BUSY: a row lock was not obtained within reservecore.lock-timeout (2 s); retry with the same Idempotency-Key after Retry-After"
+          }
+        },
+        "summary" : "Confirm a reservation",
+        "tags" : [ "Reservations" ]
+      }
+    },
+    "/v1/skus" : {
+      "post" : {
+        "description" : "All initial stock starts available. Not idempotent: retrying returns 409 SKU_ALREADY_EXISTS.",
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateSkuRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InventoryView"
+                }
+              }
+            },
+            "description" : "Created; Location is /v1/skus/{sku}"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "INVALID_QUANTITY (initialQuantity missing or < 1) or VALIDATION_FAILED (sku format, malformed JSON)"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "UNAUTHORIZED: missing, malformed, unknown or revoked API key"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "SKU_ALREADY_EXISTS"
+          }
+        },
+        "summary" : "Create a SKU with its initial stock",
+        "tags" : [ "SKUs" ]
+      }
+    },
+    "/v1/skus/{sku}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InventoryView"
+                }
+              }
+            },
+            "description" : "Current quantities"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "UNAUTHORIZED: missing, malformed, unknown or revoked API key"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "SKU_NOT_FOUND"
+          }
+        },
+        "summary" : "Availability of a SKU",
+        "tags" : [ "SKUs" ]
+      }
+    },
+    "/v1/skus/{sku}/movements" : {
+      "get" : {
+        "description" : "Every stock change, newest first. Pass nextBefore from a page as before to get the next, older page.",
+        "operationId" : "movements",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "description" : "Page size, 1 to 200",
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        }, {
+          "description" : "Return movements with an id below this cursor (nextBefore of the previous page)",
+          "in" : "query",
+          "name" : "before",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MovementPage"
+                }
+              }
+            },
+            "description" : "One page of movements"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "VALIDATION_FAILED (limit outside 1..200, before < 1)"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "UNAUTHORIZED: missing, malformed, unknown or revoked API key"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "SKU_NOT_FOUND"
+          }
+        },
+        "summary" : "Movement history of a SKU",
+        "tags" : [ "SKUs" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "CreateReservationRequest" : {
+        "type" : "object",
+        "properties" : {
+          "holdSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "quantity" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sku" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CreateSkuRequest" : {
+        "type" : "object",
+        "properties" : {
+          "initialQuantity" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sku" : {
+            "type" : "string"
+          }
+        }
+      },
+      "InventoryView" : {
+        "type" : "object",
+        "properties" : {
+          "available" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "held" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "initialQuantity" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sku" : {
+            "type" : "string"
+          },
+          "sold" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "Movement" : {
+        "type" : "object",
+        "properties" : {
+          "availableAfter" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "heldAfter" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "quantity" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "requestId" : {
+            "type" : "string"
+          },
+          "reservationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "soldAfter" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "MovementPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Movement"
+            }
+          },
+          "nextBefore" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "Problem" : {
+        "type" : "object",
+        "description" : "RFC 9457 problem details. `type` is omitted, meaning about:blank.",
+        "properties" : {
+          "code" : {
+            "type" : "string",
+            "description" : "Stable machine-readable error code",
+            "example" : "INSUFFICIENT_STOCK"
+          },
+          "detail" : {
+            "type" : "string",
+            "example" : "Requested 3 of SKU HOODIE-M but only 1 available."
+          },
+          "instance" : {
+            "type" : "string",
+            "example" : "/v1/reservations"
+          },
+          "requestId" : {
+            "type" : "string",
+            "description" : "Id of the request that produced this body",
+            "example" : "6f1c2b0e-5c1e-4c55-9d7c-1f8f3b2f8a10"
+          },
+          "status" : {
+            "type" : "integer",
+            "format" : "int32",
+            "example" : 409
+          },
+          "title" : {
+            "type" : "string",
+            "example" : "Conflict"
+          }
+        }
+      },
+      "ReservationView" : {
+        "type" : "object",
+        "properties" : {
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "quantity" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "reclaimPending" : {
+            "type" : "boolean",
+            "description" : "True while an overdue hold's units are still held, until the expiration worker or the next confirm or cancel releases them."
+          },
+          "resolvedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "sku" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "description" : "ACTIVE, CONFIRMED, CANCELLED or EXPIRED. An ACTIVE hold at or past expiresAt reads as EXPIRED because it can no longer be confirmed or cancelled."
+          }
+        }
+      }
+    },
+    "securitySchemes" : {
+      "apiKey" : {
+        "description" : "Merchant API key: rcsk_<8-char prefix>_<43-char secret>",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  }
+}

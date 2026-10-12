@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReserveCore Technical Deep Dive</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  * { box-sizing: border-box; font-variant-ligatures: none; }
+  html, body { margin: 0; height: 100%; background: #05070C; overflow: hidden; }
+  #viewport { position: fixed; inset: 0; display: grid; place-items: center; }
+  #stage { position: relative; width: 1920px; height: 1080px; transform-origin: center center; flex: none; }
+  #stage > section { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; visibility: hidden; }
+  #stage > section.on { visibility: visible; }
+  h1, h2, h3, p, ul, ol { margin: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 0.35em 0.6em; border: 1px solid #2A3449; vertical-align: top; }
+  th { font-weight: 600; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 16px; align-items: center; justify-content: space-between;
+         padding: 10px 18px; font: 14px -apple-system, Arial, sans-serif; color: #8A93A6; background: rgba(5,7,12,0.85); }
+  #bar button { font: inherit; color: #E8ECF2; background: #161D2E; border: 1px solid #2A3449; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  #notes { position: fixed; left: 0; right: 0; bottom: 48px; max-height: 32vh; overflow: auto; padding: 18px 22px;
+           font: 17px/1.5 -apple-system, Arial, sans-serif; color: #E8ECF2; background: rgba(14,19,32,0.96); border-top: 1px solid #2A3449; }
+  body.present #bar { opacity: 0; } body.present #bar:hover { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="viewport"><div id="stage">
+<section id="cover" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:grid;grid-template-columns:780px 1fr;gap:72px;align-items:center">
+<div style="display:flex;flex-direction:column;gap:32px">
+<p style="font-size:24px;font-weight:600;letter-spacing:4px;text-transform:uppercase;color:#6CA8FF">Technical deep dive</p>
+<h1 style="font-size:120px;font-weight:700;line-height:1.0;letter-spacing:-3px">ReserveCore</h1>
+<p style="font-size:40px;line-height:1.3;color:#B5BDCC">Holding limited stock during checkout without overselling, double-applying a request or losing one in a crash.</p>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px;color:#8A93A6">Spring Boot 4 · Java 25 · PostgreSQL 18</p>
+</div>
+<img src="../media/launch-video-poster.jpg" alt="Launch video frame: 20 reserved, 980 told no with 409, 0 oversold, over a grid of 1,000 request dots" style="width:832px;height:468px;object-fit:cover;border-radius:16px;border:2px solid #2A3449">
+</section>
+<section id="problem" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">One drop: 20 pairs, 1,000 checkouts in one second</h2>
+<p style="font-size:32px;line-height:1.4;color:#B5BDCC">ReserveCore is the HTTP service a storefront calls during checkout. It does not take payments. It owns the stock count, and it has to keep four promises under load.</p>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:36px">
+<h3 style="font-size:36px;font-weight:600;color:#3DDC97">Never oversell</h3>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">At most 20 pairs leave the shelf, however many requests race for them.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:36px">
+<h3 style="font-size:36px;font-weight:600;color:#6CA8FF">Apply each request once</h3>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">A retried or duplicated request never reserves a second pair.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:36px">
+<h3 style="font-size:36px;font-weight:600;color:#FFB547">Never half-apply</h3>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">A crash at any moment leaves stock exactly as before or exactly as after.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:36px">
+<h3 style="font-size:36px;font-weight:600;color:#E8ECF2">Safe on many servers</h3>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">Any number of app instances share one PostgreSQL database.</p>
+</div>
+</div>
+</section>
+<section id="model" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Three numbers per SKU, four reservation states</h2>
+<div style="display:flex;flex-direction:column;gap:12px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px 40px">
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:40px;color:#E8ECF2">initial = <span style="color:#3DDC97">available</span> + <span style="color:#FFB547">held</span> + <span style="color:#6CA8FF">sold</span></p>
+<p style="font-size:26px;color:#8A93A6">Enforced on every write by a CHECK constraint; each quantity is also kept at 0 or more.</p>
+</div>
+<table style="font-size:26px;color:#E8ECF2;border:1px solid #2A3449">
+<tr><th style="width:14%;text-align:left">From</th><th style="width:34%;text-align:left">Event</th><th style="width:18%;text-align:left">To</th><th style="width:34%;text-align:left">Stock change</th></tr>
+<tr><td>new</td><td>reserve, enough available</td><td>ACTIVE</td><td>available − q, held + q</td></tr>
+<tr style="background:#161D2E"><td>ACTIVE</td><td>confirm, before expires_at</td><td>CONFIRMED</td><td>held − q, sold + q</td></tr>
+<tr><td>ACTIVE</td><td>cancel, before expires_at</td><td>CANCELLED</td><td>held − q, available + q</td></tr>
+<tr style="background:#161D2E"><td>ACTIVE</td><td>worker, at or after expires_at</td><td>EXPIRED</td><td>held − q, available + q</td></tr>
+</table>
+<p style="font-size:28px;color:#B5BDCC">CONFIRMED, CANCELLED and EXPIRED are final. Every transition also appends a row to the movement ledger with the quantities after it and the request id that caused it.</p>
+</section>
+<section id="api" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">One checkout through the API</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px 40px">
+<p style="font-size:24px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:#6CA8FF">Request</p>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;line-height:1.5;color:#E8ECF2"><span style="color:#6CA8FF">POST</span> /v1/reservations<br><span style="color:#8A93A6">Authorization:</span> Bearer rcsk_devalice_…<br><span style="color:#8A93A6">Idempotency-Key:</span> checkout-81723<br>{"sku": "SNKR-10", "quantity": 1,<br>&#160;"holdSeconds": 600}</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px 40px">
+<p style="font-size:24px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:#3DDC97">Response</p>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;line-height:1.5;color:#E8ECF2"><span style="color:#3DDC97">HTTP/1.1 201 Created</span><br><span style="color:#8A93A6">Location:</span> /v1/reservations/01a12e0c-…<br>{"id": "01a12e0c-…",<br>&#160;"status": "ACTIVE",<br>&#160;"expiresAt": "2026-10-12T10:10:00Z"}</p>
+</div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">After payment the storefront calls <b>POST …/confirm</b>; on abandon, <b>POST …/cancel</b>; otherwise the hold expires. Every error has one shape, RFC 9457 problem details with a stable code:</p>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;color:#FFB547">409 {"code": "INSUFFICIENT_STOCK", "detail": "Requested 1 of SKU SNKR-10 but only 0 available.", …}</p>
+</section>
+<section id="endpoints" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Seven endpoints, documented and drift-checked</h2>
+<div style="display:grid;grid-template-columns:1040px 1fr;gap:48px;align-items:start">
+<img src="../media/swagger-ui.png" alt="The running Swagger UI listing the ReserveCore API: three SKU endpoints and four reservation endpoints" style="width:1040px;height:585px;object-fit:contain;border-radius:12px;border:2px solid #2A3449">
+<div style="display:flex;flex-direction:column;gap:28px">
+<div style="display:flex;flex-direction:column;gap:8px">
+<h3 style="font-size:32px;font-weight:600">SKUs</h3>
+<p style="font-size:26px;line-height:1.4;color:#B5BDCC">create, read availability, paged movement history</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<h3 style="font-size:32px;font-weight:600">Reservations</h3>
+<p style="font-size:26px;line-height:1.4;color:#B5BDCC">reserve, read, confirm, cancel; writes need an Idempotency-Key</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<h3 style="font-size:32px;font-weight:600">Drift check</h3>
+<p style="font-size:26px;line-height:1.4;color:#B5BDCC">the OpenAPI spec is committed, and a test fails the build when the code no longer matches it</p>
+</div>
+</div>
+</div>
+</section>
+<section id="race" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<p style="font-size:24px;font-weight:600;letter-spacing:4px;text-transform:uppercase;color:#6CA8FF">Scenario 1 of 5</p>
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Two shoppers, one last pair</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px 40px">
+<h3 style="font-size:32px;font-weight:600;color:#FF6B6B">Read, then write (naive)</h3>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;line-height:1.6;color:#E8ECF2">T1&#160;&#160;SELECT available&#160;&#160;→ 1<br>T2&#160;&#160;SELECT available&#160;&#160;→ 1<br>T1&#160;&#160;UPDATE available = 0<br>T2&#160;&#160;UPDATE available = <span style="color:#FF6B6B">−1</span>&#160;&#160;oversold</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px 40px">
+<h3 style="font-size:32px;font-weight:600;color:#3DDC97">One conditional UPDATE</h3>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;line-height:1.6;color:#E8ECF2">UPDATE inventory<br>SET available = available - :q,<br>&#160;&#160;&#160;&#160;held = held + :q<br>WHERE sku = :sku AND <span style="color:#3DDC97">available &gt;= :q</span><br>RETURNING available, held, sold;</p>
+</div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">T2 waits on T1's row lock. PostgreSQL then re-checks the WHERE clause against the committed row, matches nothing, and T2 gets 409 INSUFFICIENT_STOCK. No application locks, so it holds across every server.</p>
+</section>
+<section id="retries" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<p style="font-size:24px;font-weight:600;letter-spacing:4px;text-transform:uppercase;color:#6CA8FF">Scenario 2 of 5</p>
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">The shopper in a tunnel</h2>
+<div style="display:grid;grid-template-columns:720px 1fr;gap:40px;align-items:start">
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px 40px">
+<p style="font-size:24px;color:#8A93A6">First statement of the same transaction</p>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;line-height:1.6;color:#E8ECF2">INSERT INTO idempotency_record<br>&#160;&#160;(merchant_id, operation,<br>&#160;&#160;&#160;idempotency_key, request_hash)<br>VALUES (…)<br><span style="color:#6CA8FF">ON CONFLICT DO NOTHING;</span></p>
+</div>
+<table style="font-size:26px;color:#E8ECF2;border:1px solid #2A3449">
+<tr><th style="width:42%;text-align:left">Situation</th><th style="width:58%;text-align:left">Result</th></tr>
+<tr><td>Retry after the response was lost</td><td>Stored response replayed, header Idempotent-Replayed: true</td></tr>
+<tr style="background:#161D2E"><td>50 copies at the same moment</td><td>Copies wait on the key, then replay: 1 reservation</td></tr>
+<tr><td>Same key, different body</td><td>409 IDEMPOTENCY_KEY_REUSED</td></tr>
+<tr style="background:#161D2E"><td>First attempt failed with 500</td><td>Record rolled back too; the retry runs fresh</td></tr>
+</table>
+</div>
+</section>
+<section id="deadline" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:32px">
+<p style="font-size:24px;font-weight:600;letter-spacing:4px;text-transform:uppercase;color:#6CA8FF">Scenario 3 of 5</p>
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Paying at the last millisecond</h2>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">Example: the hold expires at 10:10:00.000. Payment finishes at 10:09:59.990, then the confirm waits 15 ms for a row lock.</p>
+<div style="background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:28px 40px">
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;line-height:1.6;color:#E8ECF2">SELECT … FROM reservation WHERE id = :id FOR UPDATE;&#160;&#160;<span style="color:#8A93A6">-- wait for the lock</span><br>UPDATE reservation SET status = 'CONFIRMED', resolved_at = clock_timestamp()<br>WHERE id = :id AND <span style="color:#3DDC97">clock_timestamp() &lt; expires_at</span>;&#160;&#160;<span style="color:#8A93A6">-- time read after the lock</span></p>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:8px;border:2px solid #FF6B6B;border-radius:16px;padding:24px 32px">
+<h3 style="font-size:32px;font-weight:600;color:#FF6B6B">now(): rejected design</h3>
+<p style="font-size:26px;line-height:1.4;color:#B5BDCC">Returns the transaction's start time, so the late confirm would be accepted.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;border:2px solid #3DDC97;border-radius:16px;padding:24px 32px">
+<h3 style="font-size:32px;font-weight:600;color:#3DDC97">clock_timestamp(): used</h3>
+<p style="font-size:26px;line-height:1.4;color:#B5BDCC">Read after the lock, so the 15 ms count: 409 RESERVATION_EXPIRED.</p>
+</div>
+</div>
+<p style="font-size:26px;line-height:1.4;color:#8A93A6">Boundary test, 7 runs: 30 holds expiring 30 ms ahead, confirms and workers released together. Every hold ended CONFIRMED or EXPIRED, never both.</p>
+</section>
+<section id="worker" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<p style="font-size:24px;font-weight:600;letter-spacing:4px;text-transform:uppercase;color:#6CA8FF">Scenario 4 of 5</p>
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Abandoned carts, many workers</h2>
+<div style="display:grid;grid-template-columns:860px 1fr;gap:48px;align-items:start">
+<div style="background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px 40px">
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;line-height:1.6;color:#E8ECF2">WITH due AS (<br>&#160;&#160;SELECT id FROM reservation<br>&#160;&#160;WHERE status = 'ACTIVE'<br>&#160;&#160;&#160;&#160;AND expires_at &lt;= now()<br>&#160;&#160;ORDER BY expires_at LIMIT 100<br>&#160;&#160;<span style="color:#FFB547">FOR UPDATE SKIP LOCKED</span>)<br>UPDATE reservation r<br>SET status = 'EXPIRED', resolved_at = now()<br>FROM due WHERE r.id = due.id;</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:28px">
+<ul style="font-size:28px;line-height:1.4;color:#B5BDCC;padding:0 0 0 32px">
+<li>Runs every second on every instance</li>
+<li>Each batch of up to 100 is one transaction</li>
+<li>Stock goes back in ascending row id, so two workers never deadlock</li>
+<li>No leases and no in-memory timers</li>
+</ul>
+<p style="font-size:28px;line-height:1.4;color:#E8ECF2;background:#161D2E;border:2px solid #FFB547;border-radius:16px;padding:24px 32px">4 workers, 200 due holds: each expired exactly once, split 60 / 40 / 50 / 50.</p>
+</div>
+</div>
+</section>
+<section id="crash" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<p style="font-size:24px;font-weight:600;letter-spacing:4px;text-transform:uppercase;color:#6CA8FF">Scenario 5 of 5</p>
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Pull the plug on every server</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:8px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px">
+<p style="font-size:64px;font-weight:700;color:#FFB547">30</p>
+<p style="font-size:26px;color:#B5BDCC">holds active</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px">
+<p style="font-size:64px;font-weight:700;color:#FF6B6B">2 / 2</p>
+<p style="font-size:26px;color:#B5BDCC">instances killed with SIGKILL</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px">
+<p style="font-size:64px;font-weight:700;color:#6CA8FF">30 / 30</p>
+<p style="font-size:26px;color:#B5BDCC">released, each exactly once</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px">
+<p style="font-size:64px;font-weight:700;color:#3DDC97">92 ms</p>
+<p style="font-size:26px;color:#B5BDCC">after the restarted servers were ready</p>
+</div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">The holds expired while nothing was running. On restart the first worker passes reclaimed all 30, with exactly one EXPIRED ledger row each.</p>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">Why it is safe: every operation is one transaction, so a kill leaves it fully committed or never started, and one lock order everywhere, idempotency record then reservation then inventory, rules out deadlocks.</p>
+</section>
+<section id="schema" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Rules PostgreSQL enforces, whatever the code does</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px">
+<h3 style="font-size:32px;font-weight:600;color:#3DDC97">Stock always balances</h3>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px;line-height:1.5;color:#E8ECF2">CHECK (initial_quantity =<br>&#160;&#160;available + held + sold)</p>
+<p style="font-size:26px;line-height:1.4;color:#B5BDCC">and every quantity stays at 0 or more</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px">
+<h3 style="font-size:32px;font-weight:600;color:#6CA8FF">Released at most once</h3>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px;line-height:1.5;color:#E8ECF2">UNIQUE (reservation_id)<br>WHERE kind IN ('CONFIRMED',<br>&#160;&#160;'CANCELLED', 'EXPIRED')</p>
+<p style="font-size:26px;line-height:1.4;color:#B5BDCC">one resolution row per reservation in the ledger</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:32px">
+<h3 style="font-size:32px;font-weight:600;color:#FFB547">Stores stay apart</h3>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px;line-height:1.5;color:#E8ECF2">FOREIGN KEY (merchant_id,<br>&#160;&#160;inventory_id) REFERENCES<br>&#160;&#160;inventory (merchant_id, id)</p>
+<p style="font-size:26px;line-height:1.4;color:#B5BDCC">a reservation cannot point at another store's SKU</p>
+</div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#B5BDCC">API keys look like rcsk_&lt;prefix&gt;_&lt;secret&gt;; only a SHA-256 hash is stored and compared in constant time. Another store's resources answer 404, so the API does not even reveal that they exist.</p>
+</section>
+<section id="proof" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Proof from real runs</h2>
+<table style="font-size:26px;color:#E8ECF2;border:1px solid #2A3449">
+<tr><th style="width:52%;text-align:left">Check</th><th style="width:48%;text-align:left">Result</th></tr>
+<tr><td>Integration tests on real PostgreSQL 18 (Testcontainers), no mocks, no sleeps</td><td>61 service + 4 demo tests passing</td></tr>
+<tr style="background:#161D2E"><td>Deliberate bugs: row lock, transaction, stock check, replay, SKIP LOCKED, merchant filter…</td><td>9 of 9 caught (one after tightening a test)</td></tr>
+<tr><td>Demo: 1,000 requests for 20 units, two instances</td><td>20 reserved · 980 × 409 · 0 unexpected</td></tr>
+<tr style="background:#161D2E"><td>Ledger audit on about 20,500 reservations and a restored backup</td><td>0 discrepancies</td></tr>
+<tr><td>One hot SKU on a laptop, 50 to 1,000 concurrent clients</td><td>1,900–3,500 req/s mostly refused; 1,100–1,500 reservations/s</td></tr>
+</table>
+<p style="font-size:26px;line-height:1.4;color:#8A93A6">Benchmark: Apple M4, Docker Desktop, two app instances with 10 database connections each; client on the same machine. Raw outputs are kept in docs/benchmark/.</p>
+</section>
+<section id="ops" data-transition="fade" style="background:#0E1320;color:#E8ECF2;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+<h2 style="font-size:64px;font-weight:700;line-height:1.15">Operating it, and what is still open</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:20px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:36px 40px">
+<h3 style="font-size:32px;font-weight:600;color:#3DDC97">In place</h3>
+<ul style="font-size:26px;line-height:1.45;color:#B5BDCC;padding:0 0 0 30px">
+<li>JSON logs with requestId and merchantId on every line</li>
+<li>Prometheus: HTTP, connection pool, worker lag, time since the last successful pass</li>
+<li>Readiness includes the database</li>
+<li>Database outage: requests fail within 5 s, metrics stay up, nothing half-applied</li>
+<li>Runbook with drilled backup, restore and key issuance</li>
+</ul>
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;background:#161D2E;border:2px solid #2A3449;border-radius:16px;padding:36px 40px">
+<h3 style="font-size:32px;font-weight:600;color:#FFB547">Known limits</h3>
+<ul style="font-size:26px;line-height:1.45;color:#B5BDCC;padding:0 0 0 30px">
+<li>One hot SKU is capped by its row lock</li>
+<li>Load spread across many SKUs is not benchmarked yet</li>
+<li>No admin API: stores and keys are created with SQL</li>
+<li>Actuator endpoints need no key; keep them internal</li>
+<li>Rare connection loss in 1,000-client bursts: documented, cause still open</li>
+</ul>
+</div>
+</div>
+</section>
+<section id="close" data-transition="fade" style="background:#F2F4F8;color:#0E1320;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;justify-content:center;gap:56px">
+<h1 style="font-size:120px;font-weight:700;line-height:1.05;letter-spacing:-3px">Correctness lives in the database.</h1>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px 64px">
+<p style="font-size:32px;line-height:1.35;color:#3A4558"><b style="color:#0B7A52">One conditional UPDATE</b> stops overselling.</p>
+<p style="font-size:32px;line-height:1.35;color:#3A4558"><b style="color:#0B7A52">A stored idempotency key</b> stops duplicates.</p>
+<p style="font-size:32px;line-height:1.35;color:#3A4558"><b style="color:#0B7A52">Row locks and database time</b> settle races.</p>
+<p style="font-size:32px;line-height:1.35;color:#3A4558"><b style="color:#0B7A52">SKIP LOCKED</b> makes cleanup safe on every server.</p>
+</div>
+</section>
+</div></div>
+<div id="notes" hidden></div>
+<div id="bar">
+  <span id="count"></span>
+  <span>Left / Right or click: navigate · N: speaker notes · F: full screen</span>
+  <span><button id="prev">Prev</button> <button id="next">Next</button> <button id="nbtn">Notes</button> <button id="fbtn">Full screen</button></span>
+</div>
+<script>
+  const NOTES = ["ReserveCore is a backend service that online stores call during checkout. It owns one thing: the stock count. In the next few minutes I will show the model, the API, five real failure scenarios and how each is handled, and the proof that it works, all from recorded runs. The image is a frame from the launch video: 1,000 checkout requests for 20 units, exactly 20 reserved, 980 refused, none oversold.", "A store sells 20 pairs of a limited sneaker. At 10:00:00 the drop opens and about 1,000 checkout sessions start within a second, spread across two app servers. The naive failure is overselling: two shoppers both see one left and both pay. But there are three more ways this goes wrong in production: retried requests, crashes mid-change, and several servers acting at once. ReserveCore keeps all four promises, and it does it with the database, not with in-memory locks.", "Each SKU is one row with three working numbers. Available can be reserved now, held is set aside for an ongoing checkout, sold is confirmed. Their sum always equals the initial stock, and PostgreSQL itself rejects any write that breaks that. A reservation is a small state machine with one way in and three ways out. The ledger means any number on the dashboard can be explained line by line, including which request changed it.", "This is the whole client contract for one checkout. The storefront authenticates with a merchant API key, and every write carries an Idempotency-Key, here checkout-81723, which comes back in the retry scenario. The response gives the hold and its expiry. Then exactly one of three things happens: confirm, cancel, or expiry. Errors are machine-readable: a stable code such as INSUFFICIENT_STOCK, RESERVATION_EXPIRED or IDEMPOTENCY_KEY_REUSED, plus the request id that also appears in the logs.", "This is the real Swagger UI served by a running instance. Three endpoints manage SKUs and their history; four manage reservations. The spec is generated from the code, committed to the repository, and a test compares the two on every build, so the documentation cannot silently go stale. Every call needs a merchant API key, stored only as a SHA-256 hash.", "The classic bug: check, then act. Both transactions read 1, both write, and stock goes negative. ReserveCore makes the check and the deduction one statement. When two requests hit the same row, the second waits for the first's lock; after the first commits, PostgreSQL re-evaluates the WHERE clause on the new row version, so available >= 1 is now false and zero rows match. That becomes a clean 409. I tested the naive version as a deliberate bug: requests got past the check and only the CHECK constraint stopped them, as 500 errors. So the constraint is the safety net, and the conditional UPDATE is the mechanism.", "The shopper taps Buy as the train enters a tunnel. The reservation commits, the response is lost, the app retries. Every write carries an Idempotency-Key, and the first statement of the business transaction inserts it. If the key exists with the same SHA-256 request hash, we return the stored response byte for byte. Two copies arriving at once serialize on the primary key: the second waits, then replays. In the demo, 50 simultaneous copies gave 50 identical 201s and one reservation. A different body under the same key is a 409. A 500 is never recorded, because the whole transaction rolled back, so the retry simply runs. Business refusals like out of stock are recorded, so a replay reports what originally happened. Records are kept 24 hours.", "This is the subtle one. The timestamps are an illustrative example. The confirm arrived before the deadline but had to wait 15 ms for a lock held by another request. A SELECT FOR UPDATE computes its output before it waits, and now() is the transaction's start time, so either would let a late confirm through. ReserveCore checks expiry in the UPDATE that runs once the lock is held, using clock_timestamp(), so the waiting time counts and the confirm is refused. The worker and a confirm can never both win: both need the row lock and both require status ACTIVE. The boundary test fired confirms and four workers together, right at the expiry, seven times: the results split both ways, and no hold ever ended both confirmed and expired.", "Nobody calls cancel for an abandoned cart, so every server runs an expiration pass once a second. The key clause is SKIP LOCKED: two servers running this at the same moment receive disjoint batches instead of blocking or both expiring the same row. A row a confirm is holding is skipped and retried on the next pass. Each batch is one transaction; if a server dies mid-batch, it rolls back and any instance picks the rows up again. In the test, four concurrent workers drained 200 due holds; every hold expired once, with the work split roughly evenly.", "The harshest demo. Thirty shoppers hold pairs with five-second holds. Both servers get SIGKILL, so nothing is running, and the holds expire with no worker alive. On restart, within 92 milliseconds of the servers reporting ready, all thirty were back on the shelf, each released once, with one EXPIRED row per reservation in the ledger. The demo also checks that the kill happened before the first hold expired, so the reclamation really happened after the restart.", "Application code can have bugs, so the last line of defense is in the schema. A write that unbalances stock or makes it negative is rejected. A second release of the same reservation violates a partial unique index, which is exactly what stopped the double resolutions when I removed locks on purpose. Composite foreign keys that include the merchant id make cross-store links impossible. And authentication never stores a usable key.", "Everything on this slide is measured, nothing estimated. The tests run against a real PostgreSQL container, and races are released together with latches rather than timed with sleeps. To check that the tests can actually fail, I introduced nine deliberate bugs, one at a time, and the suite caught every one; one needed a stricter assertion first. The demo runs every scenario against two live instances. The audit is a SQL script that reconciles stock, reservations and the ledger. The throughput ceiling is by design: every request for one SKU queues on that SKU's row; under load each server has all 10 connections busy while using under 4 of 10 CPU cores.", "For operations there are structured logs, Prometheus metrics including worker lag and the age of the last successful expiration pass, and a readiness check that includes the database. I drilled a database outage: requests fail within five seconds, metrics keep answering, and both instances recover without a restart. The limits are written down rather than hidden. The most interesting open one: in a few benchmark runs at 1,000 concurrent clients, five to seven requests out of a thousand lost their connection before reaching the application. They changed nothing and are safe to retry, but the root cause is not identified yet.", "To close: ReserveCore moves correctness into the database. One conditional UPDATE stops overselling, a stored idempotency key stops duplicates, row locks plus database time settle the races, and SKIP LOCKED makes cleanup safe on every server. Then it proves all of that by actually breaking things. Questions."];
+  const slides = [...document.querySelectorAll('#stage > section')];
+  const stage = document.getElementById('stage');
+  let i = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1)) || 1) - 1));
+  function fit() {
+    const s = Math.min(innerWidth / 1920, (innerHeight - (document.body.classList.contains('present') ? 0 : 48)) / 1080);
+    stage.style.transform = 'scale(' + s + ')';
+  }
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('on', k === i));
+    document.getElementById('count').textContent = (i + 1) + ' / ' + slides.length;
+    document.getElementById('notes').textContent = NOTES[i] || 'No notes for this slide.';
+    history.replaceState(null, '', '#' + (i + 1));
+  }
+  const toggleNotes = () => { const n = document.getElementById('notes'); n.hidden = !n.hidden; };
+  const fullscreen = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {});
+  document.addEventListener('fullscreenchange', () => { document.body.classList.toggle('present', !!document.fullscreenElement); fit(); });
+  addEventListener('keydown', e => {
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); show(i + 1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); show(i - 1); }
+    else if (e.key === 'Home') show(0); else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key === 'n' || e.key === 'N') toggleNotes();
+    else if (e.key === 'f' || e.key === 'F') fullscreen();
+  });
+  document.getElementById('viewport').addEventListener('click', e => show(e.clientX > innerWidth / 3 ? i + 1 : i - 1));
+  document.getElementById('prev').onclick = () => show(i - 1);
+  document.getElementById('next').onclick = () => show(i + 1);
+  document.getElementById('nbtn').onclick = toggleNotes;
+  document.getElementById('fbtn').onclick = fullscreen;
+  addEventListener('resize', fit);
+  fit(); show(i);
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+== benchmark: 1,000 one-unit requests per run, 3 runs per cell, instances 2, client JVM 25.0.4.1, client CPUs 10
+  warm-up contended (not recorded): created 20, 409 insufficient 980, unexpected 0; 873 req/s; p50 171.6 ms, p95 492.9 ms, p99 708.7 ms, max 874.0 ms
+  PASS contended c=50 run 1: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=50 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=50 run 3: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=200 run 1: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=200 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=200 run 3: 20 created, 980 rejected, 0 unexpected
+  FAIL contended c=1000 run 1: 20 created, 980 rejected, 0 unexpected: created 20, 409 insufficient 941, unexpected 39; 1238 req/s; p50 508.2 ms, p95 759.4 ms, p99 802.2 ms, max 807.1 ms {no response (ConnectException: Connection reset by peer (connect failed))=37, no response (IOException: HTTP/1.1 header parser received no bytes)=2}
+  PASS contended c=1000 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=1000 run 3: 20 created, 980 rejected, 0 unexpected
+  warm-up ample (not recorded): created 1000, 409 insufficient 0, unexpected 0; 941 req/s; p50 206.6 ms, p95 327.7 ms, p99 378.2 ms, max 442.9 ms
+  PASS ample c=50 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=50 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=50 run 3: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=200 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=200 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=200 run 3: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 3: 1000 created, 0 rejected, 0 unexpected
+
+| scenario | concurrency | run | created | 409 insufficient | unexpected | wall s | req/s | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| contended | 50 | 1 | 20 | 980 | 0 | 0.916 | 1092 | 36.4 | 112.5 | 167.5 | 247.9 |
+| contended | 50 | 2 | 20 | 980 | 0 | 0.770 | 1299 | 25.1 | 106.2 | 153.0 | 253.6 |
+| contended | 50 | 3 | 20 | 980 | 0 | 0.647 | 1547 | 25.8 | 77.0 | 115.4 | 175.0 |
+| contended | 200 | 1 | 20 | 980 | 0 | 0.566 | 1767 | 95.2 | 232.3 | 302.9 | 408.2 |
+| contended | 200 | 2 | 20 | 980 | 0 | 0.648 | 1543 | 107.4 | 269.5 | 317.6 | 459.0 |
+| contended | 200 | 3 | 20 | 980 | 0 | 0.565 | 1769 | 90.9 | 233.1 | 315.7 | 449.6 |
+| contended | 1000 | 1 | 20 | 941 | 39 | 0.808 | 1238 | 508.2 | 759.4 | 802.2 | 807.1 |
+| contended | 1000 | 2 | 20 | 980 | 0 | 0.520 | 1925 | 358.6 | 500.4 | 515.1 | 519.3 |
+| contended | 1000 | 3 | 20 | 980 | 0 | 0.421 | 2375 | 271.7 | 409.7 | 414.6 | 418.7 |
+| ample | 50 | 1 | 1000 | 0 | 0 | 0.951 | 1051 | 43.2 | 90.5 | 127.8 | 187.1 |
+| ample | 50 | 2 | 1000 | 0 | 0 | 0.814 | 1229 | 36.1 | 83.6 | 111.9 | 180.6 |
+| ample | 50 | 3 | 1000 | 0 | 0 | 0.843 | 1186 | 38.3 | 82.8 | 115.9 | 159.4 |
+| ample | 200 | 1 | 1000 | 0 | 0 | 0.918 | 1089 | 161.1 | 302.0 | 364.8 | 462.8 |
+| ample | 200 | 2 | 1000 | 0 | 0 | 0.988 | 1012 | 154.8 | 396.4 | 468.2 | 564.8 |
+| ample | 200 | 3 | 1000 | 0 | 0 | 0.718 | 1392 | 132.6 | 219.6 | 269.4 | 364.8 |
+| ample | 1000 | 1 | 1000 | 0 | 0 | 0.890 | 1124 | 452.4 | 849.9 | 879.5 | 888.6 |
+| ample | 1000 | 2 | 1000 | 0 | 0 | 0.701 | 1426 | 380.3 | 662.8 | 695.0 | 698.3 |
+| ample | 1000 | 3 | 1000 | 0 | 0 | 0.669 | 1494 | 363.5 | 641.5 | 663.9 | 668.7 |
+
+Median of the runs per cell:
+
+| scenario | concurrency | req/s | p50 ms | p95 ms | p99 ms | max ms | unexpected (total) |
+|---|---|---|---|---|---|---|---|
+| contended | 50 | 1299 | 25.8 | 106.2 | 153.0 | 247.9 | 0 |
+| contended | 200 | 1767 | 95.2 | 233.1 | 315.7 | 449.6 | 0 |
+| contended | 1000 | 1925 | 358.6 | 500.4 | 515.1 | 519.3 | 39 |
+| ample | 50 | 1186 | 38.3 | 83.6 | 115.9 | 180.6 | 0 |
+| ample | 200 | 1089 | 154.8 | 302.0 | 364.8 | 462.8 | 0 |
+| ample | 1000 | 1426 | 380.3 | 662.8 | 695.0 | 698.3 | 0 |
+run MV5HG8EM: 17 passed, 1 failed

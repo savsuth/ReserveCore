@@ -1,0 +1,51 @@
+# verify: builds and runs every test, including the Testcontainers integration tests (the ubuntu runner
+# has Docker) and OpenApiSpecTest, which fails when docs/openapi.json differs from the generated spec.
+# demo: starts the compose stack (PostgreSQL + two app instances) and runs every demo scenario, then the
+# inventory consistency check. No benchmark numbers are produced in CI.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build and test
+        run: ./mvnw -B verify
+
+  demo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build the demo client
+        run: ./mvnw -B -pl demo -am package
+      - name: Start PostgreSQL and two app instances
+        run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Run every demo scenario
+        run: java -jar demo/target/reservecore-demo.jar all
+      - name: Check inventory consistency
+        run: docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U reservecore -d reservecore < ops/consistency-check.sql
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v

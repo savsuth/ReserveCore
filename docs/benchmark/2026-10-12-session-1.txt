@@ -1,0 +1,56 @@
+started 2026-10-12T03:51:22Z
+== benchmark: 1,000 one-unit requests per run, 3 runs per cell, instances 2, client JVM 25.0.4.1, client CPUs 10
+  warm-up contended (not recorded): created 20, 409 insufficient 980, unexpected 0; 1277 req/s; p50 127.1 ms, p95 328.2 ms, p99 360.6 ms, max 410.0 ms
+  PASS contended c=50 run 1: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=50 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=50 run 3: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=200 run 1: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=200 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=200 run 3: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=1000 run 1: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=1000 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=1000 run 3: 20 created, 980 rejected, 0 unexpected
+  warm-up ample (not recorded): created 1000, 409 insufficient 0, unexpected 0; 681 req/s; p50 227.2 ms, p95 550.3 ms, p99 702.1 ms, max 846.0 ms
+  PASS ample c=50 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=50 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=50 run 3: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=200 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=200 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=200 run 3: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 3: 1000 created, 0 rejected, 0 unexpected
+
+| scenario | concurrency | run | created | 409 insufficient | unexpected | wall s | req/s | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| contended | 50 | 1 | 20 | 980 | 0 | 0.577 | 1734 | 23.0 | 59.4 | 99.8 | 175.8 |
+| contended | 50 | 2 | 20 | 980 | 0 | 0.514 | 1944 | 19.7 | 59.7 | 99.6 | 162.9 |
+| contended | 50 | 3 | 20 | 980 | 0 | 0.405 | 2471 | 16.7 | 43.9 | 78.8 | 116.4 |
+| contended | 200 | 1 | 20 | 980 | 0 | 0.410 | 2438 | 71.7 | 153.2 | 191.4 | 257.2 |
+| contended | 200 | 2 | 20 | 980 | 0 | 0.445 | 2247 | 71.6 | 195.3 | 260.0 | 428.9 |
+| contended | 200 | 3 | 20 | 980 | 0 | 0.413 | 2421 | 67.4 | 150.5 | 205.2 | 297.6 |
+| contended | 1000 | 1 | 20 | 980 | 0 | 0.386 | 2589 | 214.5 | 366.1 | 376.5 | 384.3 |
+| contended | 1000 | 2 | 20 | 980 | 0 | 0.393 | 2543 | 249.8 | 363.4 | 380.8 | 390.1 |
+| contended | 1000 | 3 | 20 | 980 | 0 | 0.353 | 2833 | 222.6 | 328.4 | 344.8 | 351.9 |
+| ample | 50 | 1 | 1000 | 0 | 0 | 0.878 | 1139 | 39.5 | 91.7 | 117.5 | 155.5 |
+| ample | 50 | 2 | 1000 | 0 | 0 | 0.976 | 1024 | 40.3 | 107.5 | 144.7 | 230.3 |
+| ample | 50 | 3 | 1000 | 0 | 0 | 0.742 | 1348 | 33.6 | 69.8 | 91.7 | 133.6 |
+| ample | 200 | 1 | 1000 | 0 | 0 | 0.775 | 1291 | 145.8 | 232.0 | 287.4 | 335.8 |
+| ample | 200 | 2 | 1000 | 0 | 0 | 0.810 | 1235 | 141.2 | 240.0 | 292.5 | 428.0 |
+| ample | 200 | 3 | 1000 | 0 | 0 | 0.733 | 1364 | 128.5 | 244.8 | 300.5 | 375.7 |
+| ample | 1000 | 1 | 1000 | 0 | 0 | 0.737 | 1356 | 382.3 | 681.3 | 710.3 | 731.8 |
+| ample | 1000 | 2 | 1000 | 0 | 0 | 0.737 | 1356 | 391.9 | 700.1 | 727.0 | 733.4 |
+| ample | 1000 | 3 | 1000 | 0 | 0 | 0.716 | 1396 | 375.0 | 680.6 | 705.4 | 711.9 |
+
+Median of the runs per cell:
+
+| scenario | concurrency | req/s | p50 ms | p95 ms | p99 ms | max ms | unexpected (total) |
+|---|---|---|---|---|---|---|---|
+| contended | 50 | 1944 | 19.7 | 59.4 | 99.6 | 162.9 | 0 |
+| contended | 200 | 2421 | 71.6 | 153.2 | 205.2 | 297.6 | 0 |
+| contended | 1000 | 2589 | 222.6 | 363.4 | 376.5 | 384.3 | 0 |
+| ample | 50 | 1139 | 39.5 | 91.7 | 117.5 | 155.5 | 0 |
+| ample | 200 | 1291 | 141.2 | 240.0 | 292.5 | 375.7 | 0 |
+| ample | 1000 | 1356 | 382.3 | 681.3 | 710.3 | 731.8 | 0 |
+run MV4PT9HY: 18 passed, 0 failed
+finished 2026-10-12T03:51:36Z

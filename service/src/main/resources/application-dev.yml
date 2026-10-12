@@ -1,0 +1,5 @@
+# Local development profile. Adds the dev-only Flyway location that seeds two demo merchants with
+# documented API keys (README.md, "Development credentials"). Never enable this profile in production.
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/dev

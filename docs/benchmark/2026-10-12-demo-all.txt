@@ -1,0 +1,64 @@
+# java -jar demo/target/reservecore-demo.jar all   (fresh compose stack, first run after startup)
+== lifecycle: reserve -> confirm, reserve -> cancel, across both instances
+  PASS reserve 2 units on instance 1 -> 201
+  PASS confirm on instance 2 -> 200
+  PASS confirmed status
+  PASS cancel on instance 1 -> 200
+  PASS cancelled status
+  PASS stock (available/held/sold)
+  PASS movement history, newest first
+  PASS another merchant reading this SKU -> 404 SKU_NOT_FOUND
+  PASS request without an API key -> 401 UNAUTHORIZED
+== contention: 20 units, 1,000 one-unit requests, distinct keys, concurrency 200, alternating instances
+  created 20, 409 insufficient 980, unexpected 0; 930 req/s; p50 180.7 ms, p95 447.2 ms, p99 614.5 ms, max 830.4 ms
+  PASS reservations created
+  PASS 409 INSUFFICIENT_STOCK rejections
+  PASS no unexpected responses
+  PASS stock seen by instance 1 (available/held/sold)
+  PASS stock seen by instance 2 (available/held/sold)
+  PASS RESERVED movements
+== expiration: three 5 s holds, one confirmed in time, two left to expire
+  PASS confirm the first before its hold expires -> 200
+  PASS stock (available/held/sold)
+  waiting for expiresAt 2026-10-12T03:50:22.752576Z and the expiration worker...
+  PASS both abandoned holds become EXPIRED
+  reclaimed 259 ms after expiresAt (worker interval 1 s)
+  PASS confirm after expiry -> 409
+  PASS stock (available/held/sold)
+  PASS EXPIRED movements
+  PASS EXPIRED movements written by the worker (requestId expiry-<batch>)
+== duplicates: 50 concurrent copies of one reservation, 20 of one confirmation
+  PASS all 50 copies -> 201
+  PASS distinct reservation ids
+  PASS responses not marked Idempotent-Replayed (the one that executed)
+  PASS retry after a lost response replays the same reservation
+  PASS same key, different request -> 409 IDEMPOTENCY_KEY_REUSED
+  PASS all 20 confirmation copies -> 200
+  PASS confirmations that executed
+  PASS confirm again with a new key -> 409 INVALID_STATE_TRANSITION
+  PASS stock (available/held/sold)
+  PASS movement history
+== worker restart: 30 holds of 5 s, every instance killed (SIGKILL), restarted after expiry
+ Container reservecore-app2-1  Killing
+ Container reservecore-app1-1  Killing
+ Container reservecore-app2-1  Killed
+ Container reservecore-app1-1  Killed
+  PASS `docker compose kill` exit code
+  PASS instances killed before the first hold expired
+  all instances down; waiting until 2026-10-12T03:50:30.261316Z so every hold expires with no worker running
+ Container reservecore-postgres-1  Waiting
+ Container reservecore-postgres-1  Waiting
+ Container reservecore-postgres-1  Healthy
+ Container reservecore-postgres-1  Healthy
+ Container reservecore-app1-1  Starting
+ Container reservecore-app2-1  Starting
+ Container reservecore-app2-1  Started
+ Container reservecore-app1-1  Started
+  PASS `docker compose start` exit code
+  PASS all instances ready again
+  PASS all 30 holds EXPIRED after restart
+  reclaimed within 92 ms of all instances reporting ready
+  PASS stock (available/held/sold)
+  PASS EXPIRED movements
+  PASS distinct reservations expired
+run MV4PRU51: 40 passed, 0 failed

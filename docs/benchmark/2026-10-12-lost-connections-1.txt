@@ -1,0 +1,26 @@
+== benchmark: 1,000 one-unit requests per run, 3 runs per cell, instances 2, client JVM 25.0.4.1, client CPUs 10
+  warm-up contended (not recorded): created 20, 409 insufficient 980, unexpected 0; 929 req/s; p50 174.0 ms, p95 474.6 ms, p99 601.1 ms, max 738.8 ms
+  FAIL contended c=1000 run 1: 20 created, 980 rejected, 0 unexpected: created 20, 409 insufficient 973, unexpected 7; 869 req/s; p50 517.9 ms, p95 710.3 ms, p99 1132.2 ms, max 1134.7 ms {no response (IOException: HTTP/1.1 header parser received no bytes)=7}
+  PASS contended c=1000 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=1000 run 3: 20 created, 980 rejected, 0 unexpected
+  warm-up ample (not recorded): created 1000, 409 insufficient 0, unexpected 0; 766 req/s; p50 242.6 ms, p95 332.8 ms, p99 408.3 ms, max 461.8 ms
+  PASS ample c=1000 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 3: 1000 created, 0 rejected, 0 unexpected
+
+| scenario | concurrency | run | created | 409 insufficient | unexpected | wall s | req/s | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| contended | 1000 | 1 | 20 | 973 | 7 | 1.151 | 869 | 517.9 | 710.3 | 1132.2 | 1134.7 |
+| contended | 1000 | 2 | 20 | 980 | 0 | 0.622 | 1607 | 433.6 | 592.2 | 607.3 | 621.1 |
+| contended | 1000 | 3 | 20 | 980 | 0 | 0.560 | 1786 | 365.4 | 525.9 | 548.1 | 554.0 |
+| ample | 1000 | 1 | 1000 | 0 | 0 | 1.250 | 800 | 724.7 | 1212.7 | 1240.2 | 1246.9 |
+| ample | 1000 | 2 | 1000 | 0 | 0 | 1.093 | 915 | 634.1 | 1027.4 | 1058.2 | 1078.7 |
+| ample | 1000 | 3 | 1000 | 0 | 0 | 0.932 | 1073 | 539.1 | 896.5 | 921.1 | 927.5 |
+
+Median of the runs per cell:
+
+| scenario | concurrency | req/s | p50 ms | p95 ms | p99 ms | max ms | unexpected (total) |
+|---|---|---|---|---|---|---|---|
+| contended | 1000 | 1607 | 433.6 | 592.2 | 607.3 | 621.1 | 7 |
+| ample | 1000 | 915 | 634.1 | 1027.4 | 1058.2 | 1078.7 | 0 |
+run MV5FE8QW: 5 passed, 1 failed

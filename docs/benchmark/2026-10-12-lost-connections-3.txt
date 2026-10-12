@@ -1,0 +1,26 @@
+== benchmark: 1,000 one-unit requests per run, 3 runs per cell, instances 2, client JVM 25.0.4.1, client CPUs 10
+  warm-up contended (not recorded): created 20, 409 insufficient 980, unexpected 0; 1654 req/s; p50 93.9 ms, p95 242.6 ms, p99 307.7 ms, max 376.5 ms
+  FAIL contended c=1000 run 1: 20 created, 980 rejected, 0 unexpected: created 20, 409 insufficient 975, unexpected 5; 951 req/s; p50 282.2 ms, p95 401.8 ms, p99 421.9 ms, max 1047.6 ms {no response (IOException: HTTP/1.1 header parser received no bytes)=5}
+  PASS contended c=1000 run 2: 20 created, 980 rejected, 0 unexpected
+  PASS contended c=1000 run 3: 20 created, 980 rejected, 0 unexpected
+  warm-up ample (not recorded): created 1000, 409 insufficient 0, unexpected 0; 1294 req/s; p50 145.9 ms, p95 246.8 ms, p99 307.7 ms, max 393.8 ms
+  PASS ample c=1000 run 1: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 2: 1000 created, 0 rejected, 0 unexpected
+  PASS ample c=1000 run 3: 1000 created, 0 rejected, 0 unexpected
+
+| scenario | concurrency | run | created | 409 insufficient | unexpected | wall s | req/s | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| contended | 1000 | 1 | 20 | 975 | 5 | 1.052 | 951 | 282.2 | 401.8 | 421.9 | 1047.6 |
+| contended | 1000 | 2 | 20 | 980 | 0 | 0.307 | 3262 | 199.1 | 281.9 | 296.7 | 303.8 |
+| contended | 1000 | 3 | 20 | 980 | 0 | 0.246 | 4058 | 156.6 | 227.7 | 238.8 | 244.4 |
+| ample | 1000 | 1 | 1000 | 0 | 0 | 0.831 | 1204 | 459.6 | 795.1 | 817.4 | 828.4 |
+| ample | 1000 | 2 | 1000 | 0 | 0 | 0.800 | 1251 | 441.4 | 741.6 | 784.0 | 797.8 |
+| ample | 1000 | 3 | 1000 | 0 | 0 | 0.804 | 1244 | 464.9 | 767.0 | 789.1 | 799.2 |
+
+Median of the runs per cell:
+
+| scenario | concurrency | req/s | p50 ms | p95 ms | p99 ms | max ms | unexpected (total) |
+|---|---|---|---|---|---|---|---|
+| contended | 1000 | 3262 | 199.1 | 281.9 | 296.7 | 303.8 | 5 |
+| ample | 1000 | 1244 | 459.6 | 767.0 | 789.1 | 799.2 | 0 |
+run MV5FKDDY: 5 passed, 1 failed

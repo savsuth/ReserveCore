@@ -1,0 +1,62 @@
+# The datasource has no default on purpose: there are no production credentials in this repo.
+# Local runs get SPRING_DATASOURCE_URL/USERNAME/PASSWORD from docker-compose.yml; tests get them
+# from Testcontainers via @ServiceConnection.
+spring:
+  application:
+    name: reservecore
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    hikari:
+      # Wait at most 5 s for a pooled connection (default 30 s), so requests and readiness fail fast while
+      # PostgreSQL is unreachable. Measured pool waits under the c=1000 benchmark stay well below this.
+      connection-timeout: 5000 # milliseconds (HikariConfig binds a long)
+
+# Actuator shares the app port and needs no API key (only /v1/** is authenticated). In production keep
+# /actuator off the public network edge; see docs/PLAN.md section 9.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          # No /v1 request can be served without PostgreSQL, so an instance without it is not ready.
+          include: readinessState,db
+          show-components: always
+
+# ECS JSON on the console. MDC values (requestId, merchantId) and SLF4J key-value pairs become JSON fields.
+logging:
+  structured:
+    format:
+      console: ecs
+
+# Reject 1.5 for integer fields such as quantity instead of truncating it to 1.
+spring.jackson.deserialization.accept-float-as-int: false
+
+reservecore:
+  # Longest wait for a row lock inside an API transaction; past it the request gets 503 SERVICE_BUSY.
+  lock-timeout: 2s
+  hold:
+    default-seconds: 600
+    min-seconds: 5
+    max-seconds: 3600
+  expiry:
+    interval: 1s
+    batch-size: 100
+    max-batches-per-tick: 10
+  idempotency:
+    retention: 24h
+    purge-batch-size: 1000
+    purge-interval: 1m
+
+# Deterministic spec output (compared with docs/openapi.json in OpenApiSpecTest). Errors are documented
+# per operation instead of attaching every @ExceptionHandler response to every operation.
+springdoc:
+  writer-with-order-by-keys: true
+  override-with-generic-response: false

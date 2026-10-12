@@ -1,0 +1,15 @@
+# Build output
+target/
+
+# IDE and OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Local secrets and overrides; never commit
+.env
+*.local.yml
+
+# Office lock files while a deck is open
+~$*

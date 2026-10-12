@@ -1,0 +1,1 @@
+1,000 checkouts raced for 20 hoodies: exactly 20 reserved, 980 told 409, 0 oversold. ReserveCore is my Spring Boot 4 + PostgreSQL 18 reservation backend, where a retried request takes effect once and, even after killing every instance, each expired hold is released exactly once.

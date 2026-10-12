@@ -1,0 +1,15 @@
+# pg_stat_activity wait states of active client backends, sampled in a tight loop during "bench --concurrencies=1000 --runs=3" (7,307 samples)
+   3594 Lock:transactionid
+   1726 Lock:tuple
+    955 Client:ClientRead
+    302 LWLock:WALWrite
+    252 CPU:active
+    224 LWLock:LockManager
+    148 IO:WalSync
+     75 -:idle in transaction
+     14 LWLock:BufferContent
+     11 IO:WalWrite
+      2 LWLock:WALInsert
+      2 LWLock:ProcArray
+      1 Timeout:SpinDelay
+      1 IO:DataFileRead

@@ -1,0 +1,10 @@
+# java -jar demo/target/reservecore-demo.jar contention --concurrency=1000
+== contention: 20 units, 1,000 one-unit requests, distinct keys, concurrency 1000, alternating instances
+  created 20, 409 insufficient 980, unexpected 0; 700 req/s; p50 764.2 ms, p95 1273.7 ms, p99 1348.7 ms, max 1410.4 ms
+  PASS reservations created
+  PASS 409 INSUFFICIENT_STOCK rejections
+  PASS no unexpected responses
+  PASS stock seen by instance 1 (available/held/sold)
+  PASS stock seen by instance 2 (available/held/sold)
+  PASS RESERVED movements
+run MV4PSWPM: 6 passed, 0 failed
